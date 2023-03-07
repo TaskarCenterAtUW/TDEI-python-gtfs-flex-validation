@@ -44,9 +44,9 @@ class GTFSFlexValidation:
                 is_valid = True
             except Exception as err:
                 validation_message = str(err)
-            finally:
-                # Removing the file
-                os.remove(downloaded_file_path)
+            # finally:
+            #     # Removing the file
+            #     os.remove(downloaded_file_path)
         else:
             source = '/'.join(self.file_path.split('/')[4:])
             blobs = self.ls_files(source, recursive=True)
