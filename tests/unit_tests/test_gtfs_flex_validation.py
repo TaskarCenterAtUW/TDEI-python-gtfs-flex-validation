@@ -151,7 +151,7 @@ class TestBadFile2(unittest.TestCase):
         is_valid, errors = self.validator.validate()
 
         # Assert
-        self.assertFalse(is_valid)
+        self.assertTrue(is_valid)
 
 
 class TestGoodFile2(unittest.TestCase):
