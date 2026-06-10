@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import logging
 import traceback
@@ -50,13 +51,24 @@ class GTFSFlexValidation:
             result = flex_validator.validate()
 
             is_valid = result.status
-            if isinstance(result.error, list) and result.error is not None:
-                for error in result.error[:]:
+            validation_errors = self.parse_validation_errors(result.error)
+            validation_info = self.parse_validation_errors(result.info)
+            if result.error is not None:
+                validation_message = self.format_validation_errors(validation_errors)
+                logger.error(f' Error While Validating File: {validation_message}')
+
+            if isinstance(validation_errors, list):
+                for error in validation_errors[:]:
+                    is_flex_error = any(self.is_flex_notice(notice) for notice in error['sampleNotices'])
+
                     # change some smaller errors to warnings instead to relax the strict validation MD gives us
-                    if error['code'] in CHANGE_ERROR_TO_WARNING:
-                        if result.info is None: result.info = []
-                        result.info.append(error)
-                        result.error.remove(error)
+                    if error['code'] in CHANGE_ERROR_TO_WARNING and not is_flex_error:
+                        if not isinstance(validation_info, list):
+                            validation_info = []
+
+                        validation_info.append(error)
+                        result.info = validation_info
+                        validation_errors.remove(error)
                         continue
 
                     # these are error codes from MD that relate to pathways that are fatal
@@ -64,40 +76,57 @@ class GTFSFlexValidation:
                         is_valid = False
                         continue
 
-                    # some of the notices relate to pathways, but there's no way to tell except with this logic:
-                    for notice in error['sampleNotices']:
-                        # one of the fields in a given file is a pathway-spec field--if it's flagged, fail
-                        if "fieldName" in notice and "filename" in notice:
-                            if notice['filename'] in FLEX_FIELDS and \
-                                    notice['fieldName'] in FLEX_FIELDS[notice['filename']]:
-                                is_valid = False
-                                continue
-
-                        # one of the pathways spec'd files has an error--if so, fail
-                        if "filename" in notice:
-                            if notice['filename'] in FLEX_FILES:
-                                is_valid = False
-                                continue
-
-                        # similar to the above, but the field for the filename is parent/child
-                        if "childFilename" in notice:
-                            if notice['childFilename'] in FLEX_FILES:
-                                is_valid = False
-                                continue
+                    if is_flex_error:
+                        is_valid = False
+                        continue
 
                 # if all errors have been downgraded to warnings, mark us as a success
-                if len(result.error) == 0:
+                if len(validation_errors) == 0:
                     is_valid = True
 
-                if result.error is not None:
-                    validation_message = str(result.error)
-                    logger.error(f' Error While Validating File: {str(result.error)}')
+                if validation_errors is not None:
+                    validation_message = self.format_validation_errors(validation_errors)
+                    logger.error(f' Error While Validating File: {validation_message}')
 
             GTFSFlexValidation.clean_up(downloaded_file_path)
         else:
             logger.error(f' Failed to validate because unknown file format')
 
         return is_valid, validation_message
+
+    @staticmethod
+    def parse_validation_errors(errors: Any) -> Any:
+        if isinstance(errors, str):
+            try:
+                return json.loads(errors)
+            except json.JSONDecodeError:
+                return errors
+
+        return errors
+
+    @staticmethod
+    def format_validation_errors(errors: Any) -> str:
+        if isinstance(errors, str):
+            return errors
+
+        return json.dumps(errors, default=str)
+
+    @staticmethod
+    def is_flex_notice(notice: dict) -> bool:
+        if "fieldName" in notice and "filename" in notice:
+            if notice['filename'] in FLEX_FIELDS and \
+                    notice['fieldName'] in FLEX_FIELDS[notice['filename']]:
+                return True
+
+        if "filename" in notice:
+            if notice['filename'] in FLEX_FILES:
+                return True
+
+        if "childFilename" in notice:
+            if notice['childFilename'] in FLEX_FILES:
+                return True
+
+        return False
 
     # Downloads the file to local folder of the server
     # file_upload_path is the fullUrl of where the
